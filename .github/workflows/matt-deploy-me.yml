@@ -1,4 +1,4 @@
-name: cli-scripts-deploy-imperative-safe-rollout-online-endpoints
+name: matt-deploy-me
 on:
   schedule:
     - cron: "0 0/4 * * *"
