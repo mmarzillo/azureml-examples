@@ -1,35 +1,56 @@
-import os
-import logging
+# ---------------------------------------------------------
+# Copyright (c) Microsoft Corporation. All rights reserved.
+# ---------------------------------------------------------
 import json
-import numpy
+import logging
+import os
+import pickle
+import numpy as np
+import pandas as pd
 import joblib
+
+import azureml.automl.core
+from azureml.automl.core.shared import logging_utilities, log_server
+from azureml.telemetry import INSTRUMENTATION_KEY
+
+from inference_schema.schema_decorators import input_schema, output_schema
+from inference_schema.parameter_types.numpy_parameter_type import NumpyParameterType
+from inference_schema.parameter_types.pandas_parameter_type import PandasParameterType
+
+
+input_sample = pd.DataFrame({"Age": pd.Series([0], dtype="int64"), "BMI": pd.Series([0.0], dtype="float64"), "BloodPressure": pd.Series([0], dtype="int64"), "DiabetesPedigreeFunction": pd.Series([0.0], dtype="float64"), "Glucose": pd.Series([0], dtype="int64"), "Insulin": pd.Series([0], dtype="int64"), "Pregnancies": pd.Series([0], dtype="int64"), "SkinThickness": pd.Series([0], dtype="int64")})
+output_sample = np.array([0])
+try:
+    log_server.enable_telemetry(INSTRUMENTATION_KEY)
+    log_server.set_verbosity('INFO')
+    logger = logging.getLogger('azureml.automl.core.scoring_script')
+except:
+    pass
 
 
 def init():
-    """
-    This function is called when the container is initialized/started, typically after create/update of the deployment.
-    You can write the logic here to perform init operations like caching the model in memory
-    """
     global model
-    # AZUREML_MODEL_DIR is an environment variable created during deployment.
-    # It is the path to the model folder (./azureml-models/$MODEL_NAME/$VERSION)
-    model_path = os.path.join(
-        os.getenv("AZUREML_MODEL_DIR"), "sklearn_regression_model.pkl"
-    )
-    # deserialize the model file back into a sklearn model
-    model = joblib.load(model_path)
-    logging.info("Init complete")
+    # This name is model.id of model that we want to deploy deserialize the model file back
+    # into a sklearn model
+    model_path = os.path.join(os.getenv('AZUREML_MODEL_DIR'), 'model.pkl')
+    path = os.path.normpath(model_path)
+    path_split = path.split(os.sep)
+    log_server.update_custom_dimensions({'model_name': path_split[-3], 'model_version': path_split[-2]})
+    try:
+        logger.info("Loading model from path.")
+        model = joblib.load(model_path)
+        logger.info("Loading successful.")
+    except Exception as e:
+        logging_utilities.log_traceback(e, logger)
+        raise
 
 
-def run(raw_data):
-    """
-    This function is called for every invocation of the endpoint to perform the actual scoring/prediction.
-    In the example we extract the data from the json input and call the scikit-learn model's predict()
-    method and return the result back
-    """
-    logging.info("Request received")
-    data = json.loads(raw_data)["data"]
-    data = numpy.array(data)
-    result = model.predict(data)
-    logging.info("Request processed")
-    return result.tolist()
+@input_schema('data', PandasParameterType(input_sample))
+@output_schema(NumpyParameterType(output_sample))
+def run(data):
+    try:
+        result = model.predict(data)
+        return json.dumps({"result": result.tolist()})
+    except Exception as e:
+        result = str(e)
+        return json.dumps({"error": result})
